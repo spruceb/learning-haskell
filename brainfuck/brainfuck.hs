@@ -6,6 +6,8 @@ import Utilities
 import qualified Data.Vector as V
 import Data.Char
 import Debug.Trace
+import Control.Monad
+import Data.List
 
 -- Just a constant (size of tape)
 memorySize = 30000
@@ -15,7 +17,7 @@ data Memory = Memory { memoryData :: V.Vector Word
                      , dataPointer :: Int
                      -- Can be printed/turned into a string. Haskell generates
                      -- the actual specialization automatically
-                     } deriving (Show) 
+                     } deriving (Show)
 
 -- There are no "methods", just functions. There's constructors for every data
 -- type, but I want to do something different than just provide values for each
@@ -35,13 +37,13 @@ createMemory size = Memory {memoryData=(V.replicate size 0), dataPointer=0}
 --
 -- Two: This is written in the point-free style using a combinator. You could
 -- rewrite this function in a more familiar fashion as the following:
--- 
+--
 -- memoryValue memory = (memoryData memory) V.! (dataPointer memory)
--- 
+--
 -- Instead, this uses the "phoenix combinator" (or phi), which is basically just:
--- 
+--
 -- pheo f g h x = f (g x) (h x)
--- 
+--
 -- i.e. given a binary function, two unary functions, and an input, it feeds the
 -- input into each of the two unary functions, then feeds the results into the
 -- binary function. Using currying, by just passing in the functions and not the
@@ -79,7 +81,10 @@ applyToOldValue :: (a -> b) -> (Memory -> a) -> (Memory -> b -> Memory) -> Memor
 applyToOldValue modifierFunction propertyFunction setFunction memory =
   setFunction memory (modifierFunction $ propertyFunction memory)
 
-incrModify = applyToOldValue (+1)
+incrModify :: (Integral a) => (Memory -> a) -> (Memory -> a -> Memory) -> Memory -> Memory
+incrModify = applyToOldValue (+ 1)
+
+decrModify :: (Integral a) => (Memory -> a) -> (Memory -> a -> Memory) -> Memory -> Memory
 decrModify = applyToOldValue (subtract 1)
 
 -- |Uses the above helper and currying to increment the pointer value. Here the
@@ -143,7 +148,7 @@ data Direction = Forward | Backward
 -- or not find one. If it doesn't, returning something like -1 to say "not
 -- found" is both ugly and unsafe/impossible to typecheck. Using a Maybe means the
 -- compiler requires and enforces dealing with the possibility that nothing
--- (Nothing) is found. 
+-- (Nothing) is found.
 bracketMatch :: Int -> String -> Direction -> Maybe Int
 -- This is using Haskell pattern matching. The parameters are an Int, String,
 -- and Direction. Here I'm binding the Int to the name index, and the string to
@@ -151,7 +156,7 @@ bracketMatch :: Int -> String -> Direction -> Maybe Int
 -- Direction value. That's because this is a pattern match. This "version" of
 -- the function will execute if the Direction is Forward.
 bracketMatch index code Forward =
-  -- Pretty much just calls a helper. 
+  -- Pretty much just calls a helper.
   bracketMatchImpl code '[' ']' [index + 1..(length code) - 1] 1
 -- Same as above but searching backward
 bracketMatch index code Backward =
@@ -273,21 +278,63 @@ evalRecursive context code =
       newContext <- ioContext
       evalRecursive newContext { commandIndex = (commandIndex newContext) + 1 } code
 
+emptyContext = Context {commandIndex=0, memory=createMemory memorySize, output=""}
+
 -- |This function produces the output of a given Brainfuck program
 -- values needed: command "index", index of last bracket, total output
 eval :: String -> IO String
-eval code =
-  let emptyContext = Context{commandIndex=0, memory=createMemory memorySize, output=""}
-  in do
-    finalContext <- evalRecursive emptyContext code
-    return $ reverse $ output finalContext
+eval code = do
+  finalContext <- evalRecursive emptyContext code
+  return $ reverse $ output finalContext
 
+
+allMatched :: String -> Bool
+allMatched = (== 0) . sum . map value
+  where
+    value '[' = 1
+    value ']' = -1
+    value _ = 0
 
 -- |This function runs an interactive Brainfuck REPL
 -- Nonfunctional at the moment because IO is hard
 repl :: IO ()
 repl = do
   putStrLn "Entering Brainfuck REPL..."
+  replRecurse emptyContext
+
+replRecurse :: Context -> IO ()
+replRecurse context = do
+  putStrLn $ replMemoryString $ memory context
+  putStr "| "
+  inputCode <- getLine
+  let untilMatching code =
+        if not (allMatched code) then do
+          putStr "..| "
+          more <- getLine
+          untilMatching $ code ++ more
+        else return code
+  finalCode <- untilMatching inputCode
+  resultContext <- evalRecursive context finalCode
+  let nextContext = emptyContext { memory=(memory resultContext) }
+  replRecurse nextContext
+
+
+replMemoryString :: Memory -> String
+replMemoryString memory =
+  let lastNonzero = case filter nonzeroTape [0..tapeLength] of
+        [] -> 0
+        (x:xs) -> x
+      end = max (dataPointer memory) lastNonzero
+  in intercalate " " $ map valueString [0..end]
+  where
+    tape = memoryData memory
+    tapeLength = (length $ tape) - 1
+    nonzeroTape = (/= 0) . (tape V.!)
+    valueAt i = (show $ tape V.! i)
+    sandwich outer inner = outer ++ inner ++ outer
+    valueString i
+      | i == (dataPointer memory) = sandwich "*" (valueAt i)
+      | otherwise = valueAt i
 
 -- The somewhat weird part: do syntax. This all looks pretty normal, but is
 -- actually doing some very weird stuff that I can only partially explain, and
@@ -317,4 +364,3 @@ main = do
           putChar '\n'
       else return ()
   putStrLn "Done"
-
