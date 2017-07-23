@@ -75,9 +75,12 @@ setMemoryValue memory value =
 setPointerValue :: Memory -> Int -> Memory
 setPointerValue memory pointer = memory { dataPointer=pointer }
 
--- |Helper function that's just returning a memory with the pointer value given
--- by the application of function f on the old value
-setModifiedPtr memory f = setPointerValue memory $ f (dataPointer memory)
+applyToOldValue :: (a -> b) -> (Memory -> a) -> (Memory -> b -> Memory) -> Memory -> Memory
+applyToOldValue modifierFunction propertyFunction setFunction memory =
+  setFunction memory (modifierFunction $ propertyFunction memory)
+
+incrModify = applyToOldValue (+1)
+decrModify = applyToOldValue (subtract 1)
 
 -- |Uses the above helper and currying to increment the pointer value. Here the
 -- function is the increment function, i.e. (+) 1. Since (+) is a function that
@@ -88,21 +91,21 @@ setModifiedPtr memory f = setPointerValue memory $ f (dataPointer memory)
 -- takes a Num and returns another function from Num -> Num. It's just
 -- syntactical sugar that 1 + 1 is the same as ((+) 1) 1
 incrPtr :: Memory -> Memory
-incrPtr memory = setModifiedPtr memory (+1)
+incrPtr = incrModify dataPointer setPointerValue
 
 -- |Same as above but subtracts one
 decrPtr :: Memory -> Memory
-decrPtr memory = setModifiedPtr memory (subtract 1)
+decrPtr = decrModify dataPointer setPointerValue
 
 -- |Basically the same as above but modifying the value at the current pointer
 -- location. I don't bother with a helper function here (due to feeling like
 -- neither way is pretty enough)
 incrValue :: Memory -> Memory
-incrValue memory = setMemoryValue memory $ (memoryValue memory) + 1
+incrValue = incrModify memoryValue setMemoryValue
 
 -- |And the same but decrementing
 decrValue :: Memory -> Memory
-decrValue memory = setMemoryValue memory $ (memoryValue memory) - 1
+decrValue = decrModify memoryValue setMemoryValue
 
 -- |This is one of the more "traditional" data types in Haskell. The simplest
 -- way to declare a type is like this, which is pretty much just an Enum
