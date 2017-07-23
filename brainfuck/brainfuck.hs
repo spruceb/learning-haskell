@@ -186,66 +186,103 @@ data Context = Context { commandIndex :: Int
                        , memory :: Memory
                        , output :: String }
 
+bfForward :: Context -> Context
+bfForward context = context { memory = incrPtr $ memory context }
+
+bfBackward :: Context -> Context
+bfBackward context = context { memory = decrPtr $ memory context }
+
+bfPlus :: Context -> Context
+bfPlus context = context { memory = incrValue $ memory context }
+
+bfMinus :: Context -> Context
+bfMinus context = context { memory = decrValue $ memory context }
+
+bfOpenClose :: (Word -> Bool) -> Direction -> Context -> String -> Context
+bfOpenClose pred direction context code
+  | pred (memoryValue $ memory context) =
+      -- Gets the Maybe match, and does a pattern match.
+      case bracketMatch (commandIndex context) code direction of
+        -- If an index was found, just change the command index to it.
+        Just index -> context { commandIndex = index }
+        -- Otherwise we have an error
+        Nothing -> error "No matching bracket"
+  | otherwise = context
+
+bfOpen :: Context -> String -> Context
+bfOpen = bfOpenClose (== 0) Forward
+
+bfClose :: Context -> String -> Context
+bfClose = bfOpenClose (/= 0) Backward
+
+bfOutput :: Context -> IO Context
+bfOutput context =
+  let intValue = (fromIntegral $ memoryValue $ memory context) :: Int
+      newCharacter = chr intValue
+      -- Note: the (:) operator *prepends*, not appends. So the output will be
+      -- reversed. Just the nature of cons lists.
+      newContext = context { output = newCharacter:(output context) }
+  in do
+    putChar newCharacter
+    return newContext
+
+bfInput :: Context -> IO Context
+bfInput context = do
+  inputChar <- getChar
+  let newValue = fromIntegral $ ord inputChar :: Word
+      newMemory = setMemoryValue (memory context) newValue
+      newContext = context { memory = newMemory }
+  return newContext
+
 -- |Using that data type, we can recursively evaluate Brainfuck code.
-evalRecursive :: Context -> String -> Context
+evalRecursive :: Context -> String -> IO Context
 evalRecursive context code =
   -- If the index is past the end of the code, we're done.
-  if (commandIndex context) == length code then context
-  else let i = commandIndex context
-           -- Otherwise, let's build a new context based on the code and the
-           -- current command index
-           newContext =
-             case code !! i of -- Switching on the character at the command index in the code
-               -- setting the memory of the context to one in which the data pointer is one higher
-               '>' -> context { memory = incrPtr $ memory context } 
-               '<' -> context { memory = decrPtr $ memory context } -- and one lower
-               -- basically the same but incrementing the value the pointer is currently at
-               '+' -> context { memory = incrValue $ memory context }
-               -- and decrementing
-               '-' -> context { memory = decrValue $ memory context }
-               -- outputting the value of the current cell (converts the Word to
-               -- a char and appends it to the Context's output)
-               '.' -> let intValue = (fromIntegral $ memoryValue $ memory context) :: Int
-                          newCharacter = chr intValue
-                          -- Note: the (:) operator *prepends*, not appends. So
-                          -- the output will be reversed. Just the nature of
-                          -- cons lists.
-                      in context { output = newCharacter:(output context) }
-               -- Jumps to the matching close bracket if the current cell is 0. Otherwise nothing.
-               '[' -> if (memoryValue $ memory context) == 0 then
-                        -- Gets the Maybe match, and does a pattern match.
-                        case bracketMatch i code Forward of
-                          -- If an index was found, just change the command index to it.
-                          Just index -> context { commandIndex = index }
-                          -- Otherwise we have an error
-                          Nothing -> error "No matching bracket"
-                      else context
-               -- Very similar, but jumps backward to matching open bracket if
-               -- the cell value is non-zero.
-               ']' -> if (memoryValue $ memory context) /= 0 then
-                        case bracketMatch i code Backward of
-                          Just index -> context { commandIndex = index }
-                          Nothing -> error "No matching bracket"
-                      else context
+  if (commandIndex context) == length code then return context
+  else
+    let i = commandIndex context
+        -- Otherwise, let's build a new context based on the code and the
+        -- current command index
+        ioContext =
+          case code !! i of -- Switching on the character at the command index in the code
+            -- setting the memory of the context to one in which the data pointer is one higher
+            '>' -> return $ bfForward context
+            '<' -> return $ bfBackward context -- and one lower
+            -- basically the same but incrementing the value the pointer is currently at
+            '+' -> return $ bfPlus context
+            -- and decrementing
+            '-' -> return $ bfMinus context
+            -- outputting the value of the current cell (converts the Word to
+            -- a char and appends it to the Context's output)
+            '.' -> bfOutput context
+            ',' -> bfInput context
+            -- Jumps to the matching close bracket if the current cell is 0. Otherwise nothing.
+            '[' -> return $ bfOpen context code
+            -- Very similar, but jumps backward to matching open bracket if
+            -- the cell value is non-zero.
+            ']' -> return $ bfClose context code
           -- Then recursivly calls the function again with the new context. Note
           -- that the command index is incremented as well, on top of whatever
           -- other changes were made to the context. This works in all cases, as
           -- for [ and ], we actually want to jump to the instruction directly
           -- *after* the matching bracket (otherwise potentially infinite loops)
-       in evalRecursive newContext { commandIndex = (commandIndex newContext) + 1 } code
+    in do
+      newContext <- ioContext
+      evalRecursive newContext { commandIndex = (commandIndex newContext) + 1 } code
 
 -- |This function produces the output of a given Brainfuck program
 -- values needed: command "index", index of last bracket, total output
-eval :: String -> String
-eval code = let emptyContext = Context{commandIndex=0, memory=createMemory memorySize, output=""}
-                finalContext = evalRecursive emptyContext code
-            -- The output from the recursive helper is reversed
-            in reverse $ output finalContext
+eval :: String -> IO String
+eval code =
+  let emptyContext = Context{commandIndex=0, memory=createMemory memorySize, output=""}
+  in do
+    finalContext <- evalRecursive emptyContext code
+    return $ reverse $ output finalContext
 
 
 -- |This function runs an interactive Brainfuck REPL
 -- Nonfunctional at the moment because IO is hard
-repl :: IO()
+repl :: IO ()
 repl = do
   putStrLn "Entering Brainfuck REPL..."
 
@@ -267,14 +304,14 @@ main = do
     1 -> do -- Otherwise (have to DO again)
       let fileName = args !! 0
       brainfuckCode <- readFile fileName -- Reads the from the filename
-      let output = eval brainfuckCode -- Evals it
-      putStrLn output -- Prints the output
+      output <- eval brainfuckCode -- Evals it
+      putChar '\n'
     2 -> do -- Or
       putStrLn "From command line" -- Reads the code from the command line
       if (args !! 0) == "-s" then -- But only if there's a certain flag
         do
-          let output = eval $ args !! 1 -- Evals and outputs
-          putStrLn output
+          output <- eval $ args !! 1 -- Evals and outputs
+          putChar '\n'
       else return ()
   putStrLn "Done"
 
