@@ -33,7 +33,7 @@ myReverse list = recurseReverse [] list
 
 -- 6
 isPalindrome :: (Eq a) => [a] -> Bool
-isPalindrome list = (myReverse list) == list
+isPalindrome = (==) <*> reverse
 
 -- 7
 data NestedList a = Elem a | List [NestedList a]
