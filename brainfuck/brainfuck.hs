@@ -28,7 +28,7 @@ createMemory :: Int -> Memory
 createMemory size = Memory {memoryData=(V.replicate size 0), dataPointer=0}
 
 -- |This gets the value of the tape at the point given by the current pointer
--- location. This is a somewhat confusing function from the standpoint of OOP.
+  -- location. This is a somewhat confusing function from the standpoint of OOP.
 -- There's pretty much two things going on here:
 --
 -- One, member accessors are functions. That is, with Memory instance m, to get
@@ -50,9 +50,13 @@ createMemory size = Memory {memoryData=(V.replicate size 0), dataPointer=0}
 -- input, you get a function that will do this on any input you pass.
 memoryValue :: Memory -> Word
 memoryValue = pheo (V.!) memoryData dataPointer
+-- + 2 3
+-- pheo (V.!) memoryData dataPointer
+-- memoryValue x = (V.!) (memoryData x) (dataPointer x)
+-- memoryValue x = (memoryData x) V.! (dataPointer x)
 
 -- |There's no mutation in Haskell (mostly). So instead when you want to "set"
--- something, you make a copy with something changed. This "sets" the value of
+-- something, you make a copy with something changed. This next line "sets" the value of
 -- the cell at the current pointer location to the passed in Word, but of course
 -- since Memories aren't mutable, just returns a new version with the changes.
 -- It does this using the // operator for vectors, which returns a new vector
